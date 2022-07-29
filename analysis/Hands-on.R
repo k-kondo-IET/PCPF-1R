@@ -1,0 +1,762 @@
+# ==============================================================================================
+# 
+#   Hands-on: PCPF-1R modeling (July 8, 2022) 
+#
+# ==============================================================================================
+
+
+#-----------------------------------------------------------------------------------------------
+# Initialization
+#-----------------------------------------------------------------------------------------------
+
+# Clean the workspace
+rm(list = ls())
+
+# Install required packages
+if (!require("FME")) install.packages("FME")
+if (!require("hydroGOF")) install.packages("hydroGOF")
+if (!require("sensitivity")) install.packages("sensitivity")
+if (!require("readr")) install.packages("readr")
+
+# read R libraries
+library(FME)
+library(hydroGOF)
+library(sensitivity)
+library(readr)
+library(ggplot2)
+
+# Read PCPF-1R model and sub-function
+source("R/PCPF-1R.R")
+source("R/PPCPF.R")
+source("R/PCONC.R")
+
+#-----------------------------------------------------------------------------------------------
+# STEP 0: Pre-processing of raw-data
+#-----------------------------------------------------------------------------------------------
+
+# Read raw data
+input_EXP       <-  read_csv("data-raw/input_experiment.csv")
+input_PHYSCHEM  <-  read_csv("data-raw/input_pesticide_physchem.csv")
+input_LAB       <-  read_csv("data-raw/input_pesticide_label_1.csv")
+data_conc       <-  read_csv("data-raw/data_conc_label_1.csv")
+
+# Create parameter set
+input_param     <-  PPCPF(input_EXP, input_PHYSCHEM, input_LAB)
+
+# Cleaning concentration data for model calibration
+data_Cpw        <-  PCONC(data_conc)
+
+# Save pre-processed data
+save(input_param, 
+     file = "data/input_param_label_1_cold.RData")
+write.csv(input_param, "data/input_label_1_cold.csv", 
+          quote=FALSE, row.names=FALSE)
+save(data_Cpw, 
+     file = "data/data_conc_label_1.RData")
+write.csv(data_Cpw, "data-raw/P_data_conc_label_1.csv", 
+          quote=FALSE, row.names=FALSE)
+
+#-----------------------------------------------------------------------------------------------
+# STEP 1: Run cold simulation with uncalibrated parameters
+#-----------------------------------------------------------------------------------------------
+
+# Read input data  
+load("data/input_param_label_1_cold.RData")
+p     <-  input_param
+  
+# Read observation data
+load("data/data_conc_label_1.RData")
+d     <-  data_Cpw
+er    <-  max(d[,2])*sqrt(length(d[,2]))
+d$W   <-  d[,2]#er
+obs   <-  read.csv("data-raw/data_conc_label_1.csv",header=T)  # For visual presentation 
+
+# Read water balance data:  
+water <-  read.csv("data-raw/data_wb_1.csv",header=T)
+
+# Run cold simulation
+out1  <-  PCPF1R(p, p, water=water, DMAX=21, fdes=1, type=2)
+save(out1, file = "output/01_coldrun_output.RData")
+write.csv(out1, "output/01_coldrun_output.csv", quote=FALSE, row.names=FALSE)
+
+# Goodness of fitting for cold simulation
+Y      <-  d[1]
+Z1     <-  c("Time","Cpw")
+out1d  <-  XXL(out1, Y, Z1)
+stat_1 <-  gof(sim=out1d$Cpw, obs=d$Cpw)
+stat_1
+save(stat_1, file = "output/01_coldrun_stat.RData")
+
+# Visual checks for both linear and log scales
+png("figs/01_coldrun_conc_linear.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(out1$Time, out1$Cpw, xlim=c(0,21), ylim=c(0,1), lty=1,lwd = 2, type="l",
+       main=paste(p$name,": Cold simulation at ",p$plot), ylab ="Concentration (mg/L)", 
+       xlab = "Day after application (day)",cex.lab=1.2)
+  for (i in 1:(nrow(obs))) {
+    if (obs[i,2]=="="){
+      points(obs$DAHA[i], obs$CONC.[i], pch=1, cex=2.5, col = "red")
+    } else if(obs[i,2]=="<") {
+      points(obs$DAHA[i], obs$CONC.[i], pch=19, cex=2.5, col = "red")
+    }
+  }
+  legend("topright", c("measured", "simulated"),lty = c(NA, 1), 
+         pch = c(1, NA), cex=1.2,bty="n", col=c("red", "black"))
+dev.off()
+
+png("figs/01_coldrun_conc_log.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(0,0.001, type = "n", bty = "n", xlim=c(0,21), ylim=c(0.001,1),
+       yaxt="n", xaxt = "n", ylab = "Concentration (mg/L)", 
+       xlab="Day after application (day)",log="y",cex.lab=1.2,
+       main=paste(p$name,": Cold simulation at ",p$plot))
+  axis(1, at=seq(0,21,3),cex.axis=1.1)
+  axis(2, at=c(0.001, 0.01 ,0.1,1), 
+       labels=c("0.001","0.01", "0.1","1"),las=1, cex.axis=1.2)
+  at.y <- outer(1:9, 10^(-3:0))
+  lab.y <- ifelse(log10(at.y) %% 1 == 0, at.y, NA)
+  axis(2, at=at.y, labels=lab.y, tcl=par("tcl")*0.5, las=1, cex.axis=1.2)
+  lines(out1$Time, out1$Cpw, lty=1,lwd = 2)
+  box()
+  for (i in 1:(nrow(obs))) {
+    if (obs[i,2]=="="){
+      points(obs$DAHA[i], obs$CONC.[i], pch=1, cex=2.5, col = "red")
+    } else if(obs[i,2]=="<") {
+      points(obs$DAHA[i], obs$CONC.[i], pch=19, cex=2.5, col = "red")
+    }
+  }
+  legend("topright", c("measured", "simulated"),lty = c(NA, 1), 
+         pch = c(1, NA), cex=1.2,bty="n", col=c("red", "black"))
+dev.off()
+
+#-----------------------------------------------------------------------------------------------
+# STEP 2: Grobal sensitivity
+#-----------------------------------------------------------------------------------------------
+# Select varied parameters
+# For granule include "kdiss" in p1
+# For flowable/emulsion include "alp" in p1
+p1   <- p[c("alp","Kd","ksorp","f","kvol","kdiff","kbulk","kbios")]
+p2   <- p[-which(names(p) %in% names(p1))] 
+
+# Define parameter range
+# For Kd, set upper and lower bounds as those of experimental results
+# For ksorp, apply 100-folds range
+# For f, set 0.1-1 as default
+# For other parameters, set upper and lower bounds as X*M and 1/X*M where M is parameter value
+parRanges <- data.frame(min=c(0.5*as.numeric(p1["alp"]),
+                              10,
+                              0.2*as.numeric(p1["ksorp"]),
+                              0.1,
+                              0.5*as.numeric(p1["kvol"]),
+                              0.5*as.numeric(p1["kdiff"]),
+                              0.05*as.numeric(p1["kbulk"]),
+                              0.5*as.numeric(p1["kbios"])
+                              ),
+                        max=c(2*as.numeric(p1["alp"]),
+                              100,
+                              5*as.numeric(p1["ksorp"]),
+                              1,
+                              2*as.numeric(p1["kvol"]),
+                              2*as.numeric(p1["kdiff"]),
+                              20*as.numeric(p1["kbulk"]),
+                              2*as.numeric(p1["kbios"])
+                              )
+                        )
+rownames(parRanges) <- c("alp","Kd","ksorp", "f","kvol","kdiff","kbulk","kbios") 
+
+# Define sensitivity function
+crlF <- function (par){
+        out <- XX(PCPF1R(par, parms2 = p2, water=water,
+                  DMAX=21,fdes=1,type=2)
+                  )
+        ssr <- modCost(mod=out,obs=d, x="Time", err="W")$model
+        return(ssr)
+        }
+
+# Run Monte-Carlo Simulation (MCS) with latin-hypercube sampling for SRRC calculation
+print(system.time(
+      CRL1 <- modCRL(func=crlF, parms=p, dist="latin", parRange=parRanges, num=250)
+      ))
+save(CRL1, file="output/02_sensitivity_MCS_1.RData")
+write.csv(CRL1, "output/02_sensitivity_MCS_1.csv", quote=FALSE, row.names=FALSE)
+
+# Visual check
+png("figs/02_sensitivity_MCS_1.png", 
+    width = 8, height = 6, units = 'in', res = 300)
+  plot(CRL1, ylab="ModelCost", trace=TRUE, main="",cex.lab=1.5,cex.axis=1.3)
+dev.off()
+  
+# Estimate SRRC
+X    <- CRL1[,1:8]
+y    <- as.vector(CRL1[,9])
+SRRC <- src(X, y, rank = TRUE)
+print(SRRC)
+save(SRRC, file="output/02_sensitivity_SRRC.RData")
+SRRC_table <- data.frame(parameter=row.names(SRRC$SRRC),SRRC$SRRC)
+write.csv(SRRC_table, 
+          file = "tables/02_sensitivity_SRRC.csv", 
+          row.names = FALSE)
+png("figs/02_sensitivity_SRRC.png", 
+    width = 8, height = 6, units = 'in', res = 300)
+  plot(SRRC)
+  abline(h=0,col="red")
+dev.off()
+
+# Select highly sensitive parameters (e.g., SRRC > 0.01) among p1
+p3   <- p[SRRC_table$parameter[abs(SRRC_table$original)>0.01]]
+p4   <- p[-which(names(p) %in% names(p3))] 
+
+# Reduce target parameters for visual assessment of prior parameter uncertainty
+parRanges2 <- parRanges[names(p3),] 
+
+# Run MCS with latin-hypercube sampling for visual assessment of prior parameter uncertainty
+SF <- function (pars) {
+   out <- PCPF1R(pars,parms2=p4,water=water,DMAX=21,fdes=1,type=2)
+   return(out)
+   }
+print(system.time(
+      Sens1 <-sensRange(func=SF, parms=p3, dist="latin", sensvar="Cpw", parRange=parRanges2, num=250)
+      ))
+save(Sens1, file="output/02_sensitivity_MCS_2.RData")
+write.csv(Sens1, "output/02_sensitivity_MCS_2.csv", quote=FALSE, row.names=FALSE)
+
+# Visual check
+# Check if observed data (>LOQ) are within the range of prediction range
+# If not, reset parameter range of "parRanges2" and rerun 
+png("figs/02_sensitivity_MCS_2_linear.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(summary(Sens1), xlim=c(0,21), ylim=c(0, 1), ylab = "Concentration (mg/L)", 
+       main=paste(p$name,": Grobal sensitivity at ",p$plot), xlab="Day after application",
+       cex.lab=1.2, legpos="topright")
+  for (i in 1:(nrow(obs))) {
+    if (obs[i,2]=="="){
+      points(obs$DAHA[i], obs$CONC.[i], pch=1, cex=2.5, col = "red")
+    } else if(obs[i,2]=="<") {
+      points(obs$DAHA[i], obs$CONC.[i], pch=19, cex=2.5, col = "red")
+    }
+  }
+dev.off()
+
+png("figs/02_sensitivity_MCS_2_log.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(summary(Sens1), xlim=c(0,21), ylim=c(0.001, 1), ylab = "Concentration (mg/L)", 
+       main="Grobal sensitivity", xlab = "Day after application",cex.lab=1.2,
+       legpos="topright", log="y")
+  for (i in 1:(nrow(obs))) {
+    if (obs[i,2]=="="){
+      points(obs$DAHA[i], obs$CONC.[i], pch=1, cex=2.5, col = "red")
+    } else if(obs[i,2]=="<") {
+      points(obs$DAHA[i], obs$CONC.[i], pch=19, cex=2.5, col = "red")
+    }
+  }
+dev.off()
+
+#-----------------------------------------------------------------------------------------------
+# STEP 3: Local sensitivity analysis
+#-----------------------------------------------------------------------------------------------
+
+# define new function
+SF <- function (par) {
+  out <- PCPF1R(par, parms2 = p4, water=water,DMAX=21,type=2, fdes=1)
+  return(modCost(mod = out, obs = d, x= "Time", err="W"))
+  }
+SFA <- sensFun(func = SF, parms = p3)
+save(SFA, file="output/03_sensitivity_SFA.RData")
+
+png("figs/03_sensitivity_local.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(SFA,legpos="bottomright")
+dev.off()
+
+# Summary of local sensitivity analysis
+summary(SFA)
+write.csv(summary(SFA), 
+          file = "tables/03_sensitivity_local.csv", 
+          row.names = TRUE)
+
+# Parameter identifiability
+# select "identifiable (collinearity < 20)" sets
+ident         <- collin(SFA, which = "Cpw")
+save(ident, file="output/03_sensitivity_ident.RData")
+calibpar_list <- ident[ident[,"collinearity"] < 20,]
+write.csv(calibpar_list, 
+          file = "tables/03_sensitivity_ident.csv", 
+          row.names = TRUE)
+calibpar_list
+
+#-----------------------------------------------------------------------------------------------
+# STEP 4: Model fitting
+#-----------------------------------------------------------------------------------------------
+
+# Select parameter set for calibration
+# Set row number of calibpar_list in instead of "22"
+calibpar <-  colnames(calibpar_list[22,which(calibpar_list[22,]==1)])
+p5       <-  p[calibpar]
+p6       <-  p[-which(names(p) %in% names(p5))] 
+            
+F <- function (par) {
+  out <- PCPF1R(exp(par), parms2 = p6, water=water,DMAX=21,type=2, fdes=1)
+  return(modCost(mod = out, obs = d, x= "Time", err="W"))
+  }
+
+# Set initial parameter set and parameter range
+ppl <- as.numeric(parRanges2[names(p5),1])
+ppu <- as.numeric(parRanges2[names(p5),2])
+
+# log-transformation
+pp  <- log(unlist(p5))
+ppl <- log(ppl)
+ppu <- log(ppu)
+
+# Start fitting
+print(system.time(Fit <- modFit(p=pp,f=F,lower=ppl,upper=ppu,method="Pseudo",
+                                control=c(numiter=1000,varleft=0.01,verbose=TRUE)
+                                )
+                  )
+      )
+
+
+# Check results
+summary(Fit)
+exp(coef(Fit))
+save(Fit, file="output/04_fitting_Fit.RData")
+
+# Save calibrated parameter set
+input_param_2  <- p
+for (j in 1:length(exp(coef(Fit)))){
+  nval = names(exp(coef(Fit)[i]))
+  input_param_2[nval] = as.numeric(exp(coef(Fit)[i]))
+}
+save(input_param_2, file = "data/input_param_label_1_calib.RData")
+write.csv(input_param_2, "data/input_label_1_calib.csv", 
+          quote=FALSE, row.names=FALSE)
+
+# Run calibrated simulation
+out2 <- PCPF1R(exp(coef(Fit)), parms2 = p6, water=water,DMAX=21,type=2,fdes=1)
+save(out2, file = "output/04_fitting_output.RData")
+write.csv(out2, "output/04_fitting_output.csv", quote=FALSE, row.names=FALSE)
+
+# Goodness of fitting for cold simulation
+Y      <-  d[1]
+Z1     <-  c("Time","Cpw")
+out2d  <-  XXL(out2, Y, Z1)
+stat_2 <-  gof(sim=out2d$Cpw, obs=d$Cpw)
+stat_2
+save(stat_2, file = "output/04_fitting_stat.RData")
+
+# Visual checks for both linear and log scales
+png("figs/04_fitting_conc_linear.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(out2$Time, out2$Cpw, xlim=c(0,21), ylim=c(0,1), lty=1,lwd = 2, type="l",
+       main=paste(p$name,": Calibrated simulation at ",p$plot), ylab ="Concentration (mg/L)", 
+       xlab = "Day after application (day)",cex.lab=1.2)
+  for (i in 1:(nrow(obs))) {
+    if (obs[i,2]=="="){
+      points(obs$DAHA[i], obs$CONC.[i], pch=1, cex=2.5, col = "red")
+    } else if(obs[i,2]=="<") {
+      points(obs$DAHA[i], obs$CONC.[i], pch=19, cex=2.5, col = "red")
+    }
+  }
+  legend("topright", c("measured", "simulated"),lty = c(NA, 1), 
+         pch = c(1, NA), cex=1.2,bty="n", col=c("red", "black"))
+dev.off()
+
+png("figs/04_fitting_conc_log.png", 
+      width = 6, height = 6, units = 'in', res = 300)
+  plot(0,0.001, type = "n", bty = "n", xlim=c(0,21), ylim=c(0.001,1),
+       yaxt="n", xaxt = "n", ylab = "Concentration (mg/L)", 
+       xlab="Day after application (day)",log="y",cex.lab=1.2,
+       main=paste(p$name,": Calibrated simulation at ",p$plot))
+  axis(1, at=seq(0,21,3),cex.axis=1.1)
+  axis(2, at=c(0.001, 0.01 ,0.1,1), 
+       labels=c("0.001","0.01", "0.1","1"),las=1, cex.axis=1.2)
+  at.y <- outer(1:9, 10^(-3:0))
+  lab.y <- ifelse(log10(at.y) %% 1 == 0, at.y, NA)
+  axis(2, at=at.y, labels=lab.y, tcl=par("tcl")*0.5, las=1, cex.axis=1.2)
+  lines(out2$Time, out2$Cpw, lty=1,lwd = 2)
+  box()
+  for (i in 1:(nrow(obs))) {
+    if (obs[i,2]=="="){
+      points(obs$DAHA[i], obs$CONC.[i], pch=1, cex=2.5, col = "red")
+    } else if(obs[i,2]=="<") {
+      points(obs$DAHA[i], obs$CONC.[i], pch=19, cex=2.5, col = "red")
+    }
+  }
+  legend("topright", c("measured", "simulated"),lty = c(NA, 1), 
+         pch = c(1, NA), cex=1.2,bty="n", col=c("red", "black"))
+dev.off()
+
+#-----------------------------------------------------------------------------------------------
+# STEP 5: Assessing parameter uncertainty using MCMC
+#-----------------------------------------------------------------------------------------------
+
+# Set MCMC inputs
+var0 <- Fit$var_ms_unweighted
+cov0 <- summary(Fit)$cov.scaled*2.4^2/5
+#cov0 <- diag(0.001,3)
+
+F2 <- function (par) {
+   out <- PCPF1R(exp(par), parms2 = p6, water=water,DMAX=21,type=2, fdes=1)
+   Y         <-  d[1]
+   Z1        <-  c("Time","Cpw")
+   outd      <-  XXL(out, Y, Z1)
+   residuals <-  (outd$Cpw-d$Cpw)/d$W
+   return(sum(residuals^2))
+}
+
+print(system.time(
+      MCMC <- modMCMC(f=F2, p=Fit$par, niter=6000, upper=ppu, lower=ppl, 
+                      jump=0.01, wvar0=1, updatecov=50, ntrydr= 2,
+                      burninlength=1000
+                      )
+              )
+      )
+
+MCMC$pars <- exp(MCMC$pars)
+
+save(MCMC, file = "output/05_MCMC_single.RData")
+write.csv(MCMC$pars,           
+          file = "tables/05_MCMC_single_pars.csv", 
+          row.names = TRUE)
+
+png("figs/05_MCMC_single_chain.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(MCMC, Full=TRUE)
+dev.off()
+
+png("figs/05_MCMC_single_pair.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  pairs(MCMC)
+dev.off()
+  
+MCMC$count
+
+summary(MCMC)
+write.csv(summary(MCMC), 
+          file = "tables/05_MCMC_single_stat.csv", 
+          row.names = TRUE)
+
+cov(MCMC$pars)
+
+summary(Fit)$cov.scaled 
+
+cor(MCMC$pars)
+
+exp(MCMC$bestpar)
+
+# Save calibrated parameter set
+input_param_3  <- p
+for (i in 1:length(exp(MCMC$bestpar))){
+  nval = names(exp(MCMC$bestpar[i]))
+  input_param_3[nval] = as.numeric(exp(MCMC$bestpar[i]))
+}
+save(input_param_3,file = "data/input_param_label_1_bestpar.RData")
+write.csv(input_param_3, "data/input_label_1_bestpar.csv", 
+          quote=FALSE, row.names=FALSE)
+
+# Monte Carlo Run
+SF <- function (pars) {
+   out <- PCPF1R(pars, parms2 = p6, water=water, DMAX=21,type=2, fdes=1)
+   return(out)
+   }
+Sens2 <- sensRange(func=SF, parInput=MCMC$par, sensvar="Cpw")
+
+save(Sens2, file="output/05_MCMC_MCS.RData")
+write.csv(Sens2, "output/05_MCMC_MCS.csv", quote=FALSE, row.names=FALSE)
+
+# Visual check
+png("figs/05_MCMC_MCS_linear.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(summary(Sens2), xlim=c(0,21), ylim=c(0, 1), ylab = "Concentration (mg/L)", 
+       main=paste(p$name,": Uncertainty analysis at ",p$plot), xlab="Day after application",
+       cex.lab=1.2, legpos="topright")
+  for (i in 1:(nrow(obs))) {
+    if (obs[i,2]=="="){
+      points(obs$DAHA[i], obs$CONC.[i], pch=1, cex=2.5, col = "red")
+    } else if(obs[i,2]=="<") {
+      points(obs$DAHA[i], obs$CONC.[i], pch=19, cex=2.5, col = "red")
+    }
+  }
+dev.off()
+
+png("figs/05_MCMC_MCS_log.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(summary(Sens2), xlim=c(0,21), ylim=c(0.001, 1), ylab = "Concentration (mg/L)", 
+       main=paste(p$name,": Uncertainty analysis at ",p$plot), xlab="Day after application",
+       cex.lab=1.2,legpos="topright", log="y")
+  for (i in 1:(nrow(obs))) {
+    if (obs[i,2]=="="){
+      points(obs$DAHA[i], obs$CONC.[i], pch=1, cex=2.5, col = "red")
+    } else if(obs[i,2]=="<") {
+      points(obs$DAHA[i], obs$CONC.[i], pch=19, cex=2.5, col = "red")
+    }
+  }
+dev.off()
+
+
+# Run with bestpar
+# Select parameter set
+out3 <- PCPF1R(exp(MCMC$bestpar), p6, water=water,DMAX=21,fdes=1,type=2)
+save(out3, file = "output/05_MCMC_output.RData")
+write.csv(out3, "output/05_MCMC_output.csv", quote=FALSE, row.names=FALSE)
+
+# Goodness of fitting for cold simulation
+Y      <-  d[1]
+Z1     <-  c("Time","Cpw")
+out3d  <-  XXL(out3, Y, Z1)
+stat_3 <-  gof(sim=out3d$Cpw, obs=d$Cpw)
+stat_3
+save(stat_3, file = "output/05_stat_MCMC.RData")
+stat_F <-  as.data.frame(cbind(stat_1,stat_2,stat_3))[c("NSE","rNSE","bR2","PBIAS %","RSR"),]
+colnames(stat_F)  <- c("Cold run","Model fitting","MCMC")
+write.csv(stat_F,           
+          file = "tables/05_MCMC_stat_F.csv", 
+          row.names = TRUE)
+
+# Visual checks for both linear and log scales
+png("figs/05_MCMC_conc_linear.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(out2$Time, out2$Cpw, xlim=c(0,21), ylim=c(0,1), lty=1,lwd = 2, type="l",
+       main=paste(p$name,": MCMC-calibrated simulation at ",p$plot), ylab ="Concentration (mg/L)", 
+       xlab = "Day after application (day)",cex.lab=1.2)
+  for (i in 1:(nrow(obs))) {
+    if (obs[i,2]=="="){
+      points(obs$DAHA[i], obs$CONC.[i], pch=1, cex=2.5, col = "red")
+    } else if(obs[i,2]=="<") {
+      points(obs$DAHA[i], obs$CONC.[i], pch=19, cex=2.5, col = "red")
+    }
+  }
+  legend("topright", c("measured", "simulated"),lty = c(NA, 1), 
+         pch = c(1, NA), cex=1.2,bty="n", col=c("red", "black"))
+dev.off()
+
+png("figs/05_MCMC_conc_log.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  plot(0,0.001, type = "n", bty = "n", xlim=c(0,21), ylim=c(0.001,1),
+       yaxt="n", xaxt = "n", ylab = "Concentration (mg/L)", 
+       xlab="Day after application (day)",log="y",cex.lab=1.2,
+       main=paste(p$name,": MCMC-calibrated simulation at ",p$plot))
+  axis(1, at=seq(0,21,3),cex.axis=1.1)
+  axis(2, at=c(0.001, 0.01 ,0.1,1), 
+       labels=c("0.001","0.01", "0.1","1"),las=1, cex.axis=1.2)
+  at.y <- outer(1:9, 10^(-3:0))
+  lab.y <- ifelse(log10(at.y) %% 1 == 0, at.y, NA)
+  axis(2, at=at.y, labels=lab.y, tcl=par("tcl")*0.5, las=1, cex.axis=1.2)
+  lines(out2$Time, out2$Cpw, lty=1,lwd = 2)
+  box()
+  for (i in 1:(nrow(obs))) {
+    if (obs[i,2]=="="){
+      points(obs$DAHA[i], obs$CONC.[i], pch=1, cex=2.5, col = "red")
+    } else if(obs[i,2]=="<") {
+      points(obs$DAHA[i], obs$CONC.[i], pch=19, cex=2.5, col = "red")
+    }
+  }
+  legend("topright", c("measured", "simulated"),lty = c(NA, 1), 
+         pch = c(1, NA), cex=1.2,bty="n", col=c("red", "black"))
+dev.off()
+
+
+#-----------------------------------------------------------------------------------------------
+
+
+# Advanced application: MCMC with multiple chains
+iniPar <- data.frame(Chain1=exp(coef(Fit)), Chain2=exp(coef(Fit)), Chain3=exp(coef(Fit)))
+iniPar <- sweep(iniPar, MARGIN = 2, STATS = c(1, 0.9, 1.1), FUN = "*")
+var0 <- Fit$var_ms_unweighted
+cov0 <- summary(Fit)$cov.scaled * 2.4 ^ 2/5
+
+# Reset parameter range
+ppl <- 0.9*pmax((0.5*exp(coef(Fit))),exp(ppl))
+ppu <- 1.1*pmin((2*exp(coef(Fit))),exp(ppu))
+ppl <- log(ppl)
+ppu <- log(ppu)
+
+print(system.time(
+                  MCMC <- apply(iniPar, MARGIN = 2, FUN = function(iIniPar) {
+                                  modMCMC(f=F, p=log(iIniPar), niter=5000, lower=ppl, upper=1.1*ppu, 
+                                          jump = cov0, var0 = var0, wvar0 = 1, updatecov = 50,#ntrydr=2,
+                                          burninlength=0, outputlength=5000)
+                     })
+                    )
+      )
+
+# Check the convergence of chains
+MC <- as.mcmc.list(lapply(MCMC2, FUN = function(x) {
+                   mcmc(as.matrix(exp(x$pars)))#,start=1, end=1000, thin=1))
+                   }))
+
+# Visual assessment using ggmcmc package
+if (!require("ggmcmc")) install.packages("ggmcmc")
+library(ggmcmc) 
+parDRAM <- ggs(MC)
+#burnParDRAM <- filter(parDRAM, Iteration > 500)
+
+ggs_traceplot(parDRAM)
+
+ggs_density(parDRAM)
+
+ggs_pairs(parDRAM, lower = list(continuous = "density"))
+
+# Statistical assessment
+gelman.diag(MC,autoburnin = FALSE)
+autocorr.diag(MC)
+geweke.diag(MC)
+
+# Statistical summary of MCMC
+summary(MC)
+
+# Best parameter set
+lapply(MCMC, FUN = function(x) {as.data.frame(exp(x$bestpar))})
+Bestparam <- lapply(MCMC, FUN = function(x) {as.data.frame(exp(x$bestpar))})
+
+# Posterior covariance
+lapply(MCMC, FUN = function(x) {cov(as.matrix(exp(x$par)))})
+
+#-----------------------------------------------------------------------------------------------
+# STEP 6: Application
+#-----------------------------------------------------------------------------------------------
+# Read PCPF-BR model and sub-function
+source("R/PCPF-BR.R")
+source("R/WBcalc.R")
+
+meteo    <- read.csv("data-raw/data_meteodef.csv",header=T)
+flow     <- read.csv("data-raw/data_flowdef.csv",header=T)
+pcpfin   <- read.csv("data/input_label_1_bestpar.csv",header=T)
+waterin  <- read.csv("data-raw/input_wbcalc.csv",header=T)
+blockin  <- read.csv("data-raw/input_blockcalc.csv",header=T)
+
+# Cold run
+outB1    <- PCPFBR(pcpfin, waterin, blockin, flow, meteo, DMAX=30, type=2)
+save(out3, file = "output/06_prediction_coldrun.RData")
+write.csv(out3, "output/06_prediction_coldrun.csv", quote=FALSE, row.names=FALSE)
+
+png("figs/06_prediction_coldrun.png", 
+    width = 8, height = 6, units = 'in', res = 300)
+  par(mar = c(4, 4, 4, 4))
+  plot(outB1$DASS,outB1$PEC,xlab="Day After Simulation Started",ylab="Conc. [ppb]",
+       ylim=c(0,1),type="l",lwd=2, las=2)
+  par(new=T)
+  barplot(outB1$AppAmount/1000, ylim=c(50,0),yaxt="n")
+  axis(4, at=c(50,40,30,20,10,0), labels=c("50","40","30","20","10","0"), las=2)
+  corners = par("usr") #Gets the four corners of plot area (x1, x2, y1, y2)
+  par(xpd = TRUE) #Draw outside plot area
+  text(x = corners[2]+3, y = mean(corners[3:4]), "App.amount [kg]", srt = 270)
+dev.off()
+
+# Create MCS parameter set
+# For block calculation parameters
+pars_B   <-  c(Hmax     =  5, 
+               ddrain   =  0.5, 
+               dperc    =  0.5, 
+               dseep    =  0.1, 
+               WHP      =  1,
+               hflow    =  3,
+               pfr      =  0.05,
+               usage    =  0.1,
+               Klevee   =  17.22,
+               AppStdev =  1
+               )
+parRanges <- data.frame(min = c( 1,  0.1, 0.1,  0.1,  0,   1,  0.01, 0.05, 10, 1), 
+                        max = c(10,  1.0,  1,   1.0,  7,  10,  0.2,  0.3,  25, 5)
+                        )
+rownames(parRanges)<- c("Hmax", "ddrain", "dperc", "dseep", "WHP", "hflow", 
+                        "pfr", "usage", "Klevee","AppStdev")
+parRanges
+parlist_B <- Latinhyper(parRanges, 500)
+
+# Retrieving PCPF inputs from posterior distributions 
+load("output/05_MCMC_single.RData")
+pars_P  <- exp(MCMC$bestpar)
+POSTERI <- function (pars) {
+  out <- pars
+  return(out)
+}
+parlist_P <- sensRange(func=POSTERI, parInput=MCMC$par, num=500)[names(pars_P)]
+
+# Build final parameter set for MCS
+pars     <- c(pars_B, pars_P)
+parlist  <- cbind(parlist_B,parlist_P)
+
+# Monte Carlo run
+MP       <- 30
+SFB <- function (pars) {
+   X <- pcpfin
+   Y <- waterin
+   Z <- blockin
+   for (i in 1:length(pars)){
+     nval <- names(pars[i])
+     if (nval %in% names(X)){
+       X[nval] = as.numeric(pars[i])
+     } else if (nval %in% names(Y)){
+       Y[nval] = as.numeric(pars[i])
+     } else if (nval %in% names(Z)){
+       Z[nval] = as.numeric(pars[i])
+     }    
+   }
+   out <- PCPFBR(pcpfin=X, waterin=Y, blockin=Z, flow, meteo, DMAX=MP, type=2)
+   return(out)
+}
+
+SensB     <- sensRange(func=SFB,parms=pars,sensvar="PEC",parInput=parlist,num=500)
+save(SensB, file="output/06_prediction_MCS.RData")
+write.csv(SensB, "output/06_prediction_MCS.csv", quote=FALSE, row.names=FALSE)
+summary_SensB <- summary(SensB) 
+save(Sens2, file="output/06_prediction_summary_MCS.RData")
+write.csv(Sens2, "output/06_prediction_summary_MCS.csv", quote=FALSE, row.names=FALSE)
+
+png("figs/06_prediction_MCS.png", 
+    width = 8, height = 6, units = 'in', res = 300)
+  plot(summary(SensB), xlim=c(0,30),quant = TRUE, col=c("lightblue","blue"),
+       main="",legpos=NULL, cex.axis=1.5, cex.lab=1.5)
+dev.off()
+
+# Analyze simulated data
+# Calculate SRRC
+SensB2          <- SensB
+SensB2$PECMAX   <- apply(SensB2[,(length(pars)+1):(length(pars)+MP)],1,max)
+save(SensB2, file="output/06_prediction_MCS_2.RData")
+write.csv(SensB2, "output/06_prediction_MCS_2.csv", quote=FALSE, row.names=FALSE)
+X               <- SensB2[,1:length(pars)]
+y               <- as.vector(SensB2[,"PECMAX"])
+SRRCB           <- src(X, y, rank = TRUE)
+print(SRRCB)
+SRRC_table2     <- data.frame(parameter=row.names(SRRCB$SRRC),SRRCB$SRRC)
+write.csv(SRRC_table2, 
+          file = "tables/06_prediction_block_SRRC.csv", 
+          row.names = FALSE)
+SRRC_table2s     <- SRRC_table2[order(abs(SRRC_table2[,2])),]
+SRRC_table2s_nam <- SRRC_table2s[(nrow(SRRC_table2s)-4):nrow(SRRC_table2s),1]
+png("figs/06_prediction_block_SRRC.png", 
+    width = 8, height = 6, units = 'in', res = 300)
+  barplot(SRRC_table2s[,2],names.arg=SRRC_table2s[,1],horiz=T,xlim=c(-1,1),las=2)
+  box()
+dev.off()
+
+
+# Endpoint (3ug/L) assessment
+EP              <- 3
+png("figs/06_prediction_block_hist.png", 
+    width = 6, height = 6, units = 'in', res = 300)
+  hist(SensB2$PECMAX,breaks="FD",xlim=c(0,20))
+  abline(v=EP)
+  box()
+dev.off()
+SensB3          <- SensB2[SensB2$PECMAX>EP,]
+save(SensB3, file="output/06_prediction_MCS_3.RData")
+write.csv(SensB3, "output/06_prediction_MCS_3.csv", quote=FALSE, row.names=FALSE)
+summary_SensB3  <- apply(SensB3[,1:(length(pars))],2,summary)
+summary_SensB3
+write.csv(summary_SensB3,           
+          file = "tables/06_prediction_summary_MCS.csv", 
+          row.names = TRUE)
+
+png("figs/06_prediction_block_boxplot.png", 
+    width = 8, height = 4, units = 'in', res = 300)
+par(mfrow = c(1, 5))
+for (i in 1:5) {
+  BP <- SRRC_table2s_nam[5-i+1]
+  boxplot(SensB3[,BP], xlab=BP)
+}
+dev.off()
+
+

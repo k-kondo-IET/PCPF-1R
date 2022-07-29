@@ -1,5 +1,5 @@
 ## ======================================================================================= ##
-## PCPF-1R model Version 2.2 (Last update: 2022/01/04)                                     ##
+## PCPF-1R model Version 2.3 (Last update: 2022/07/07)                                     ##
 ## Simulating fate and transport processes of pesticide and its metabolite in rice paddy   ##
 ## Coded by K. Kondo (The Institute of Environmental Toxicology)                           ##
 ## Contact adresss; kondoh@iet.or.jp                                                       ##
@@ -34,6 +34,9 @@
 # 2021/01/29: bulk degradation option is revived (set fdegw = 1 as default)
 # 2022/01/04: User specified initial condition "ini_state" was introduced
 #             Logical parameter "rBC" was installed for coupled simulation
+# 2022/02/11: Temperature dependency for kbios
+# 2022/07/07: Rename kbiow -> kbulk for fdegw = 1
+
 
 ####################
 #   Main program   #
@@ -239,7 +242,7 @@ DISS <- function(parms,
         if (fdegw == 2) {
           cwDEG    <- ((khyd +kbiow + kphot) / 24) * Cpwi
         } else {
-          cwDEG    <- (kbiow / 24) * Cpwi
+          cwDEG    <- (kbulk / 24) * Cpwi
         }
         cwdhdt   <- 1 / Hpw1 * dHpw1 / DT * Cpwi
         K1w      <- cwDISS + cwDES + cwPERT + cwIRR - cwDPL - cwVOL - cwDEG - cwdhdt 
@@ -299,11 +302,10 @@ DISS <- function(parms,
         cwIRR    <- 1 / HpwH * irr * cwIRR
         cwDPL    <- 1 / HpwH * (Cpwi + 0.5 * K1w) * (drain + perc + seep)
         cwVOL    <- 1 / HpwH * 100 * (kvol / 24) * (Cpwi + 0.5 * K1w)
-        cwDEG    <- ((khyd +kbiow + kphot) / 24) * (Cpwi + 0.5 * K1w)
         if (fdegw == 2) {
           cwDEG    <- ((khyd +kbiow + kphot) / 24) * (Cpwi + 0.5 * K1w)
         } else {
-          cwDEG    <- (kbiow / 24) * (Cpwi + 0.5 * K1w)
+          cwDEG    <- (kbulk / 24) * (Cpwi + 0.5 * K1w)
         }
         cwdhdt   <- 1 / HpwH * dHpwH / DT * (Cpwi + 0.5 * K1w)
         K2w      <- cwDISS + cwDES + cwPERT + cwIRR - cwDPL - cwVOL - cwDEG - cwdhdt 
@@ -349,7 +351,7 @@ DISS <- function(parms,
         if (fdegw == 2) {
           cwDEG    <- ((khyd + kbiow + kphot) / 24) * (Cpwi + 0.5 * K2w)
         } else {
-          cwDEG    <- (kbiow / 24) * (Cpwi + 0.5 * K2w)
+          cwDEG    <- (kbulk / 24) * (Cpwi + 0.5 * K2w)
         }
         cwdhdt   <- 1 / HpwH * dHpwH / DT * (Cpwi + 0.5 * K2w)
         K3w      <- cwDISS + cwDES + cwPERT + cwIRR - cwDPL - cwVOL - cwDEG - cwdhdt 
@@ -395,7 +397,7 @@ DISS <- function(parms,
         if (fdegw == 2) {
           cwDEG    <- ((khyd +kbiow + kphot) / 24) * (Cpwi + K3w)
         } else {
-          cwDEG    <- (kbiow / 24) * (Cpwi + K3w)
+          cwDEG    <- (kbulk / 24) * (Cpwi + K3w)
         }
         cwdhdt   <- 1 / Hpw2 * dHpw2 / DT * (Cpwi + K3w)
         K4w      <- cwDISS + cwDES + cwPERT + cwIRR - cwDPL - cwVOL - cwDEG - cwdhdt 
@@ -642,18 +644,17 @@ DISS <- function(parms,
 # Combine parameter set
 para <- c(parms, parms2)
 
-
 # Start time loop for the computation of PCPF-1
 for (i in 1:DMAX){
    if (i == 1) {
         WB  <- with(as.data.frame(water), {
-                 Hpw1   <-  water[i   ,"h"]
-                 perc   <-  water[i+1 ,"perc"] / 24
-                 rain   <-  water[i+1 ,"rain"] / 24
-                 irr    <-  water[i+1 ,"irr"] / 24
-                 drain  <-  water[i+1 ,"drain"] / 24
-                 seep   <-  water[i+1 ,"seep"] / 24
-                 et     <-  water[i+1 ,"et"] / 24
+                 Hpw1   <-  as.numeric(water[i   ,"h"])
+                 perc   <-  as.numeric(water[i+1 ,"perc"] / 24)
+                 rain   <-  as.numeric(water[i+1 ,"rain"] / 24)
+                 irr    <-  as.numeric(water[i+1 ,"irr"] / 24)
+                 drain  <-  as.numeric(water[i+1 ,"drain"] / 24)
+                 seep   <-  as.numeric(water[i+1 ,"seep"] / 24)
+                 et     <-  as.numeric(water[i+1 ,"et"] / 24)
                  Cj     <-  rain + irr - perc - seep - et - drain
                  as.list(c(Hpw1=Hpw1, perc = perc, rain = rain, irr = irr, drain = drain, 
                            seep = seep, et = et, Cj = Cj))      
@@ -662,12 +663,12 @@ for (i in 1:DMAX){
         BC <- state
    } else if (i %% 24 == 1) {
         WB  <- with(as.data.frame(water), {
-                 perc   <-  water[(i %/% 24)+2 ,"perc"] / 24
-                 rain   <-  water[(i %/% 24)+2 ,"rain"] / 24
-                 irr    <-  water[(i %/% 24)+2 ,"irr"] / 24
-                 drain  <-  water[(i %/% 24)+2 ,"drain"] / 24
-                 seep   <-  water[(i %/% 24)+2 ,"seep"] / 24
-                 et     <-  water[(i %/% 24)+2 ,"et"] / 24
+                 perc   <-  as.numeric(water[(i %/% 24)+2 ,"perc"] / 24)
+                 rain   <-  as.numeric(water[(i %/% 24)+2 ,"rain"] / 24)
+                 irr    <-  as.numeric(water[(i %/% 24)+2 ,"irr"] / 24)
+                 drain  <-  as.numeric(water[(i %/% 24)+2 ,"drain"] / 24)
+                 seep   <-  as.numeric(water[(i %/% 24)+2 ,"seep"] / 24)
+                 et     <-  as.numeric(water[(i %/% 24)+2 ,"et"] / 24)
                  Cj     <-  rain + irr - perc - seep - et - drain
                  as.list(c(perc = perc, rain = rain, irr = irr, drain = drain, 
                            seep = seep, et = et, Cj = Cj))      
@@ -733,7 +734,7 @@ for (i in 1:DMAX){
        }
      }
    }
-#browser()
+
 # pH dependence of hydrolysis parameter
    if (pH == TRUE) {      
      pH1 <- with(as.data.frame(meteolist), meteolist[i+1,"pH"])
@@ -749,8 +750,9 @@ for (i in 1:DMAX){
 
 # Temperature dependence of degradation parameter
    if (temp == TRUE) {
-     T1 <- with(as.data.frame(meteolist), meteolist[i+1,"temp"])
-     kbiow   <-  with(as.list(para), kbiow_ref * exp(Ea/0.008314*(1/(273.14+Tdef)-1/(273.14+T1))))
+     T1 <- with(as.data.frame(meteolist), meteolist[i+1,"Tw"])
+     T2 <- with(as.data.frame(meteolist), meteolist[i+1,"Ts"])
+     kbiow   <-  with(as.list(para), kbiow_ref * exp(Ea_bio/0.008314*(1/(273.14+Tdef)-1/(273.14+T1))))
      if (exists('kbiow', where=para) == TRUE) {
        para["kbiow"] <- kbiow
      } else {
@@ -758,15 +760,25 @@ for (i in 1:DMAX){
        names(para_d) <- "kbiow"
        para <- c(para, para_d)
      }
-     khyd   <-  with(as.list(para), khyd_ref * exp(Ea/0.008314*(1/(273.14+Tdef)-1/(273.14+T1))))
-     if (exists('khyd', where=para) == TRUE) {
-       para["khyd"] <- khyd
+     kbios   <-  with(as.list(para), kbios_ref * exp(Ea_bio/0.008314*(1/(273.14+Tdef)-1/(273.14+T2))))
+     if (exists('kbios', where=para) == TRUE) {
+       para["kbios"] <- kbios
      } else {
-       para_d <- list(khyd)
-       names(para_d) <- "khyd"
+       para_d <- list(kbios)
+       names(para_d) <- "kbios"
        para <- c(para, para_d)
      }
-     parms["khyd"] <- khyd
+     if (fdegw == 2) {
+       khyd   <-  with(as.list(para), khyd_ref * exp(Ea_hyd/0.008314*(1/(273.14+Tdef)-1/(273.14+T1))))
+       if (exists('khyd', where=para) == TRUE) {
+         para["khyd"] <- khyd
+       } else {
+         para_d <- list(khyd)
+         names(para_d) <- "khyd"
+         para <- c(para, para_d)
+       }
+       parms["khyd"] <- khyd
+     }
    }          
 
 # UV dependence of degradation parameter
@@ -835,6 +847,8 @@ for (i in 1:DMAX){
             PmassPW      <-  0
             PmassDL      <-  0
             CMCdeg       <-  0
+            CMpwdeg      <-  0 
+            CMsdldeg     <-  0
             CRFloss      <-  0
             CPERCloss    <-  0
             CLSEEPloss   <-  0
@@ -858,7 +872,9 @@ for (i in 1:DMAX){
                         TPMdiss     =  TPMdiss,
                         PmassPW     =  PmassPW,
                         PmassDL     =  PmassDL, 
-                        CMCdeg      =  CMCdeg, 
+                        CMCdeg      =  CMCdeg,
+                        CMpwdeg     =  CMpwdeg, 
+                        CMsdldeg    =  CMsdldeg, 
                         CRFloss     =  CRFloss,
                         CPERCloss   =  CPERCloss, 
                         DriMass     =  DriMass,
@@ -887,7 +903,9 @@ for (i in 1:DMAX){
                         TPMdiss     =  TPMdiss,
                         PmassPW     =  PmassPW,
                         PmassDL     =  PmassDL, 
-                        CMCdeg      =  CMCdeg, 
+                        CMCdeg      =  CMCdeg,
+                        CMpwdeg     =  CMpwdeg, 
+                        CMsdldeg    =  CMsdldeg, 
                         CRFloss     =  CRFloss,
                         CPERCloss   =  CPERCloss, 
                         MBE         =  MBE, 
@@ -925,6 +943,8 @@ for (i in 1:DMAX){
             PmassPW      <-  0
             PmassDL      <-  0
             CMCdeg       <-  0
+            CMpwdeg      <-  0 
+            CMsdldeg     <-  0
             CRFloss      <-  0
             CPERCloss    <-  0
             CLSEEPloss   <-  0
@@ -948,9 +968,12 @@ for (i in 1:DMAX){
                         TPMdiss   =  TPMdiss,
                         PmassPW   =  PmassPW,
                         PmassDL   =  PmassDL,
-                        CMCdeg    =  CMCdeg, 
+                        CMCdeg    =  CMCdeg,
+                        CMpwdeg   =  CMpwdeg, 
+                        CMsdldeg  =  CMsdldeg,  
                         CRFloss   =  CRFloss,
                         CPERCloss =  CPERCloss,
+                        CSEEPloss =  CLSEEPloss,
                         DriMass   =  DriMass * 100, 
                         MBE       =  MBE,
                         Fdiss     =  Fdiss
@@ -969,14 +992,17 @@ for (i in 1:DMAX){
                         PmassPW   =  PmassPW,
                         PmassDL   =  PmassDL,
                         CMCdeg    =  CMCdeg, 
+                        CMpwdeg   =  CMpwdeg, 
+                        CMsdldeg  =  CMsdldeg,  
                         CRFloss   =  CRFloss,
                         CPERCloss =  CPERCloss, 
+                        CSEEPloss =  CLSEEPloss,
                         MBE       =  MBE,
                         Fdiss     =  Fdiss,
                         khyd      =  khyd,
                         kbiow     =  kbiow,
                         kphot     =  kphot,
-                        kbulk     =  khyd + kbiow + kphot 
+                        kbulk     =  kbulk 
                      ))
             }        
        }) 
@@ -1014,6 +1040,8 @@ for (i in 1:DMAX){
           PmassPW      <-  PmassPW / APPMass * 100
           PmassDL      <-  PmassDL / APPMass * 100
           CMCdeg       <-  CMCdeg / APPMass * 100
+          CMpwdeg      <-  CMpwdeg / APPMass * 100
+          CMsdldeg     <-  CMsdldeg / APPMass * 100
           CRFloss      <-  CRFloss / APPMass * 100
           CPERCloss    <-  CPERCloss / APPMass * 100
           CLSEEPloss   <-  CLSEEPloss / APPMass * 100
@@ -1037,7 +1065,9 @@ for (i in 1:DMAX){
                       TPMdiss     =  TPMdiss,
                       PmassPW     =  PmassPW,
                       PmassDL     =  PmassDL, 
-                      CMCdeg      =  CMCdeg, 
+                      CMCdeg      =  CMCdeg,
+                      CMpwdeg     =  CMpwdeg,
+                      CMsdldeg    =  CMsdldeg, 
                       CRFloss     =  CRFloss,
                       CPERCloss   =  CPERCloss, 
                       DriMass     =  DriMass,
@@ -1066,7 +1096,9 @@ for (i in 1:DMAX){
                       TPMdiss     =  TPMdiss,
                       PmassPW     =  PmassPW,
                       PmassDL     =  PmassDL, 
-                      CMCdeg      =  CMCdeg, 
+                      CMCdeg      =  CMCdeg,
+                      CMpwdeg     =  CMpwdeg,
+                      CMsdldeg    =  CMsdldeg,  
                       CRFloss     =  CRFloss,
                       CPERCloss   =  CPERCloss, 
                       MBE         =  MBE, 
@@ -1104,6 +1136,8 @@ for (i in 1:DMAX){
           PmassPW      <-  (PmassPW / APPMass * 100) / DriMass
           PmassDL      <-  (PmassDL / APPMass * 100) / DriMass
           CMCdeg       <-  (CMCdeg / APPMass * 100) / DriMass
+          CMpwdeg      <-  (CMpwdeg / APPMass * 100) / DriMass
+          CMsdldeg     <-  (CMsdldeg / APPMass * 100) / DriMass
           CRFloss      <-  (CRFloss / APPMass * 100) / DriMass
           CPERCloss    <-  (CPERCloss / APPMass * 100) / DriMass
           CLSEEPloss   <-  (CLSEEPloss / APPMass * 100) / DriMass
@@ -1127,9 +1161,12 @@ for (i in 1:DMAX){
                       TPMdiss   =  TPMdiss,
                       PmassPW   =  PmassPW,
                       PmassDL   =  PmassDL,
-                      CMCdeg    =  CMCdeg, 
+                      CMCdeg    =  CMCdeg,
+                      CMpwdeg   =  CMpwdeg, 
+                      CMsdldeg  =  CMsdldeg, 
                       CRFloss   =  CRFloss,
                       CPERCloss =  CPERCloss,
+                      CSEEPloss =  CLSEEPloss,
                       DriMass   =  DriMass * 100, 
                       MBE       =  MBE,
                       Fdiss     =  Fdiss
@@ -1147,15 +1184,18 @@ for (i in 1:DMAX){
                       TPMdiss   =  TPMdiss,
                       PmassPW   =  PmassPW,
                       PmassDL   =  PmassDL,
-                      CMCdeg    =  CMCdeg, 
+                      CMCdeg    =  CMCdeg,
+                      CMpwdeg   =  CMpwdeg, 
+                      CMsdldeg  =  CMsdldeg,
                       CRFloss   =  CRFloss,
                       CPERCloss =  CPERCloss, 
+                      CSEEPloss =  CLSEEPloss,
                       MBE       =  MBE,
                       Fdiss     =  Fdiss,
                       khyd      =  khyd,
                       kbiow     =  kbiow,
                       kphot     =  kphot,
-                      kbulk     =  khyd + kbiow + kphot 
+                      kbulk     =  kbulk 
                    ))
           }        
      }) 
@@ -1340,10 +1380,10 @@ return(out)
 XXL <- function(X,Y,Z){
       for(i in 1:nrow(Y)){
         if (i == 1){
-          a <-X[X[,Z[1]] ==  Y[i,1], Z]
+          a <-X[X[,Z[1]] ==  as.numeric(Y[i,1]), Z]
           out <- a
         } else {
-          b <-X[X[,Z[1]] ==  Y[i,1], Z]
+          b <-X[X[,Z[1]] ==  as.numeric(Y[i,1]), Z]
           out <-rbind(out,b)
         }
       }
