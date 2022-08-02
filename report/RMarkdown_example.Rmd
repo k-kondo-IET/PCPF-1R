@@ -1,0 +1,30 @@
+---
+title: "写真-2 Rマークダウンによる文芸的プログラム"
+author: "近藤 圭"
+date: '2022-08-01'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("knitr")
+library("rprojroot")
+library("sensitivity")
+knitr::opts_knit$set(root.dir=rprojroot::find_rstudio_root_file())
+getwd()
+setwd(find_rstudio_root_file())
+getwd()
+load("output/02_sensitivity_MCS_1.RData")
+```
+### テキストチャンクの見出し
+
+この部分がテキストチャンクである。以下のコードチャンクは，例としてグローバル感度解析で得られたSRRCを再出力する。`knit`して出力すると，実施した操作，出力結果および図が表示される。
+
+```{r SRRC}
+# この部分がコードチャンクである。
+X    <- CRL1[,1:8]
+y    <- as.vector(CRL1[,9])
+SRRC <- src(X, y, rank = TRUE)
+print(SRRC)
+plot(SRRC)
+abline(h=0,col="red")
+```

@@ -1,23 +1,15 @@
-# ==============================================================================================
-# 
-#   Hands-on: PCPF-1R modeling (July 8, 2022) 
-#
-# ==============================================================================================
+---
+title: "オープンソフトウェアRによる再現可能な数理モデル解析－水田水中除草剤動態を例に－" 
+subtitle: "2. ハンズオン"
+author: "近藤 圭"
+author-meta: "一般財団法人残留農薬研究所 化学部"
+date: '`r format(Sys.time(), "%Y/%m/%d %H:%M")`'
+output:
+  html_document
+  pdf_document
+---
 
-
-#-----------------------------------------------------------------------------------------------
-# Initialization
-#-----------------------------------------------------------------------------------------------
-
-# Clean the workspace
-rm(list = ls())
-
-# Install required packages
-if (!require("FME")) install.packages("FME")
-if (!require("hydroGOF")) install.packages("hydroGOF")
-if (!require("sensitivity")) install.packages("sensitivity")
-if (!require("readr")) install.packages("readr")
-
+```{r, include = FALSE}
 # read R libraries
 library(FME)
 library(hydroGOF)
@@ -29,11 +21,27 @@ library(ggplot2)
 source("R/PCPF-1R.R")
 source("R/PPCPF.R")
 source("R/PCONC.R")
+```
 
-#-----------------------------------------------------------------------------------------------
-# STEP 0: Pre-processing of raw-data
-#-----------------------------------------------------------------------------------------------
+# (1) 解析準備～データの前処理
 
+`data-raw`フォルダ内の以下のファイルに，実験データを生データとして入力する。
+
+-   水中残留濃度 (*data_conc_label_1.csv*)
+
+-   水収支 (*data_wb_1.csv*)
+
+-   実験圃場の情報 (*input_experiment.csv*)
+
+-   処理農薬製剤情報 (*input_pesticide_label_1.csv*)
+
+対象農薬中有効成分の対象成分の分子量，水溶解度，蒸気圧，土壌吸着性および分解情報を以下のファイルに入力する。
+
+-   物理的化学的パラメータ (*input_pesticide_physchem.csv*)
+
+本稿では原則として，全てが一括で入手可能である農薬抄録あるいは農薬の審査報告書からの取得を推奨する。 これらを用いて表-1に示すPCPF-1Rモデルの入力パラメータセットを前処理済みデータとして作成する。
+
+```{r }
 # Read raw data
 input_EXP       <-  read_csv("data-raw/input_experiment.csv")
 input_PHYSCHEM  <-  read_csv("data-raw/input_pesticide_physchem.csv")
@@ -56,9 +64,13 @@ save(data_Cpw,
 write.csv(data_Cpw, "data-raw/P_data_conc_label_1.csv", 
           quote=FALSE, row.names=FALSE)
 
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 # STEP 1: Run cold simulation with uncalibrated parameters
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 
 # Read input data  
 load("data/input_param_label_1_cold.RData")
@@ -129,9 +141,13 @@ png("figs/01_coldrun_conc_log.png",
          pch = c(1, NA), cex=1.2,bty="n", col=c("red", "black"))
 dev.off()
 
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 # STEP 2: Grobal sensitivity
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 # Select varied parameters
 # For granule include "kdiss" in p1
 # For flowable/emulsion include "alp" in p1
@@ -251,9 +267,13 @@ png("figs/02_sensitivity_MCS_2_log.png",
   }
 dev.off()
 
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 # STEP 3: Local sensitivity analysis
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 
 # define new function
 SF <- function (par) {
@@ -284,9 +304,13 @@ write.csv(calibpar_list,
           row.names = TRUE)
 calibpar_list
 
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 # STEP 4: Model fitting
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 
 # Select parameter set for calibration
 # Set row number of calibpar_list in instead of "17"
@@ -386,9 +410,13 @@ png("figs/04_fitting_conc_log.png",
          pch = c(1, NA), cex=1.2,bty="n", col=c("red", "black"))
 dev.off()
 
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 # STEP 5: Assessing parameter uncertainty using MCMC
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 
 # Set MCMC inputs
 var0 <- Fit$var_ms_unweighted
@@ -556,7 +584,9 @@ png("figs/05_MCMC_conc_log.png",
 dev.off()
 
 
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 
 
 # Advanced application: MCMC with multiple chains
@@ -612,9 +642,13 @@ Bestparam <- lapply(MCMC, FUN = function(x) {as.data.frame(exp(x$bestpar))})
 # Posterior covariance
 lapply(MCMC, FUN = function(x) {cov(as.matrix(exp(x$par)))})
 
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 # STEP 6: Application
-#-----------------------------------------------------------------------------------------------
+```
+
+```{r }
 # Read PCPF-BR model and sub-function
 source("R/PCPF-BR.R")
 source("R/WBcalc.R")
@@ -761,5 +795,4 @@ for (i in 1:5) {
   axis(1, at=1, labels = BP, cex.axis = 1.5)
 }
 dev.off()
-
-
+```
