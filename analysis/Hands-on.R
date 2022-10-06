@@ -728,8 +728,8 @@ SRRC_table2s     <- SRRC_table2[order(abs(SRRC_table2[,2])),]
 SRRC_table2s_nam <- SRRC_table2s[(nrow(SRRC_table2s)-4):nrow(SRRC_table2s),1]
 png("figs/06_prediction_block_SRRC.png", 
     width = 8, height = 6, units = 'in', res = 300)
-  par(mar = c(2, 5, 2, 2))
-  barplot(SRRC_table2s[,2],names.arg=SRRC_table2s[,1],horiz=T,xlim=c(-1,1),las=1)
+  par(mar = c(4, 5, 2, 2))
+  barplot(SRRC_table2s[,2],names.arg=SRRC_table2s[,1],horiz=T,xlim=c(-1,1),las=1,xlab="SRRC")
   box()
 dev.off()
 
